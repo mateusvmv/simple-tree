@@ -1,5 +1,5 @@
 #![feature(coroutines, coroutine_trait, iter_from_coroutine)]
-use std::{mem, ops::{Bound, RangeBounds}};
+use std::{iter, mem, ops::{Bound, RangeBounds}};
 #[cfg(test)]
 mod tests;
 
@@ -81,23 +81,17 @@ impl<K: Ord, V> SimpleTree<K, V> {
 		cs[i].remove(key)
 	}
 	pub fn range(&self, range: impl RangeBounds<K>) -> impl Iterator<Item = &(K, V)> where K: Clone {
-		std::iter::from_coroutine(move || {
-			let range = Box::new(range);
-			let x = (!matches!(range.start_bound(), Bound::Unbounded))
-				.then(|| self.0.partition_point(|(k,_)| !(range.start_bound(), Bound::Unbounded).contains(k)))
-				.unwrap_or(0);
-			let y = (!matches!(range.start_bound(), Bound::Unbounded))
-				.then(|| self.0.partition_point(|(k,_)| (Bound::Unbounded, range.end_bound()).contains(k)))
-				.unwrap_or(self.0.len());
-			for i in x..y {
-				let from = (i==x).then(|| range.start_bound().cloned()).unwrap_or(Bound::Unbounded);
-				if let Some(c) = &self.1 {
-					for k in Box::new(c[i].range((from, Bound::Unbounded))) { yield k };
-				}
-				yield &self.0[i];
-			}
+		iter::from_coroutine(move || {
+			let x = self.0.iter().take_while(|(k,_)| !(range.start_bound(), Bound::Unbounded).contains(k)).count();
+			let y = x + self.0[x..].iter().take_while(|(k,_)| (Bound::Unbounded, range.end_bound()).contains(k)).count();
 			if let Some(c) = &self.1 {
-				for k in Box::new(c[y].range(*range)) { yield k };
+				for ((c, e), from) in c[x..y].iter().zip(&self.0[x..y]).zip(iter::once(range.start_bound().cloned()).chain(iter::repeat(Bound::Unbounded))) {
+					for k in Box::new(c.range((from, Bound::Unbounded))) { yield k };
+					yield e;
+				}
+				for k in Box::new(c[y].range(range)) { yield k };
+			} else {
+				for e in &self.0[x..y] { yield e };
 			}
 		})
 	}
