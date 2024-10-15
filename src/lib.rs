@@ -1,5 +1,5 @@
 #![feature(coroutines, coroutine_trait, iter_from_coroutine)]
-use std::{iter, mem, ops::{Bound, RangeBounds}};
+use std::{iter, mem, ops::RangeBounds};
 #[cfg(test)]
 mod tests;
 
@@ -78,18 +78,21 @@ impl<K: Ord, V> SimpleTree<K, V> {
 		}
 		cs[i].remove(key)
 	}
-	pub fn range(&self, range: impl RangeBounds<K>) -> impl Iterator<Item = &(K, V)> where K: Clone {
+	pub fn range(&self, range: impl RangeBounds<K>) -> impl Iterator<Item = &(K, V)> {
+		let mut stack = vec![(self, 0, None)];
 		iter::from_coroutine(move || {
-			let x = self.0.iter().take_while(|(k,_)| !(range.start_bound(), Bound::Unbounded).contains(k)).count();
-			let y = x + self.0[x..].iter().take_while(|(k,_)| (Bound::Unbounded, range.end_bound()).contains(k)).count();
-			if let Some(c) = &self.1 {
-				for ((c, e), from) in c[x..y].iter().zip(&self.0[x..y]).zip(iter::once(range.start_bound().cloned()).chain(iter::repeat(Bound::Unbounded))) {
-					for k in Box::new(c.range((from, Bound::Unbounded))) { yield k };
-					yield e;
+			while let Some((t, mut i, aft)) = stack.pop() {
+				while i < t.0.len() && !range.contains(&t.0[i].0) { i += 1 };
+				if let Some(cs) = &t.1 {
+					if i < t.0.len() && range.contains(&t.0[i].0) {
+						stack.extend([(t, i+1, aft), (&cs[i], 0, Some(&t.0[i]))]);
+					} else {
+						stack.push((&cs[i], 0, aft));
+					}
+				} else {
+					while i < t.0.len() && range.contains(&t.0[i].0) { yield &t.0[i]; i += 1; }
+					if let Some(e) = aft { yield e };
 				}
-				for k in Box::new(c[y].range(range)) { yield k };
-			} else {
-				for e in &self.0[x..y] { yield e };
 			}
 		})
 	}
