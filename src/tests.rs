@@ -1,3 +1,5 @@
+use rand::seq::SliceRandom;
+
 use super::*;
 
 fn in_order_traversal(tree: &SimpleTree<u32>) -> Vec<u32> {
@@ -39,12 +41,16 @@ fn test_random() {
     }
     keys.sort();
     keys.dedup();
+    let mut rng = rand::thread_rng();
+    keys.shuffle(&mut rng);
+
     for &k in &keys {
+        tree.insert(k, ());
+        assert!(tree.remove(&k).is_some());
         tree.insert(k, ());
     }
     eprintln!("{:?}", tree.range(..).collect::<Vec<_>>());
     for k in &keys {
-        eprintln!("remove {k} from {tree:?}");
         assert!(tree.remove(k).is_some());
     }
 }

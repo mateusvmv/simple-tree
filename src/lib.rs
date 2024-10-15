@@ -53,29 +53,28 @@ impl<K: Ord, V> SimpleTree<K, V> {
 			return self.0.binary_search_by(|(k,_)| k.cmp(key)).ok()
 				.map(|i| self.0.remove(i));
 		};
-		let mut i = self.0.binary_search_by(|(k,_)| k.cmp(key))
-			.map(|i| {
-				let mut c = &mut cs[i];
-				while let Some(gc) = &mut c.1 { c = gc.last_mut().unwrap() }
-				mem::swap(&mut self.0[i], c.0.last_mut().unwrap());
-				i
-			})
-			.unwrap_or_else(|e| e);
-		if cs[i].0.len() > A { return cs[i].remove(key) };
-		if i > 0 && cs[i-1].0.len() > A {
-			let [l, r] = &mut cs[i-1..=i] else { panic!() };
-			r.0.insert(0, l.0.pop().unwrap());
-			if let (Some(l), Some(r)) = (l.1.as_mut(), r.1.as_mut()) {
-				r.insert(0, l.pop().unwrap());
+		let mut i = self.0.partition_point(|(k,_)| k < key);
+		if cs[i].0.len() <= A {
+			if i > 0 && cs[i-1].0.len() > A {
+				let [l, r] = &mut cs[i-1..=i] else { panic!() };
+				r.0.insert(0, l.0.pop().unwrap());
+				if let (Some(l), Some(r)) = (l.1.as_mut(), r.1.as_mut()) {
+					r.insert(0, l.pop().unwrap());
+				}
+				mem::swap(&mut self.0[i-1], &mut r.0[0]);
+			} else {
+				i -= (i > 0 && cs[i-1].0.len() == A) as usize;
+				Self::merge(&mut self.0, cs, i);
+				if self.0.is_empty() {
+					*self = cs.remove(0);
+					return self.remove(key);
+				}
 			}
-			mem::swap(&mut self.0[i-1], &mut r.0[0]);
-		} else {
-			i -= (i > 0 && cs[i-1].0.len() == A) as usize;
-			Self::merge(&mut self.0, cs, i);
-			if self.0.is_empty() {
-				*self = cs.remove(0);
-				return self.remove(key);
-			}
+		}
+		if self.0.get(i).map(|(k,_)| k == key).unwrap_or(false) {
+			let mut c = &mut cs[i];
+			while let Some(gc) = &mut c.1 { c = gc.last_mut().unwrap() }
+			mem::swap(&mut self.0[i], c.0.last_mut().unwrap());
 		}
 		cs[i].remove(key)
 	}
