@@ -21,16 +21,16 @@ impl<K: Ord, V> SimpleTree<K, V> {
 	}
 	fn merge(ks: &mut Vec<(K, V)>, cs: &mut Vec<Self>, i: usize) {
 		let [l, r] = &mut cs[i..=i+1] else { panic!() };
-		let k = if r.0.len() == A { A + 1 } else { r.0.len() - A };
-		l.0.extend(r.0.drain(..k.min(r.0.len())));
+		let (k, j) = if r.0.len() == A { (A, A + 1) } else { (r.0.len() - A, r.0.len() - A) };
+		l.0.push(mem::replace(&mut ks[i], r.0.remove(k-1)));
+		l.0.extend(r.0.drain(..k-1));
 		if let (Some(l), Some(r)) = (l.1.as_mut(), r.1.as_mut()) {
-			l.extend(r.drain(..k));
+			l.extend(r.drain(..j));
 		}
-		mem::swap(&mut ks[i], l.0.last_mut().unwrap());
 		if r.0.is_empty() {
 			l.0.push(ks.remove(i));
-			cs.remove(i+1);
-		}
+            cs.remove(i+1);
+        }
 	}
 	pub fn insert(&mut self, key: K, val: V) {
 		if self.0.len() == B {
@@ -48,16 +48,11 @@ impl<K: Ord, V> SimpleTree<K, V> {
 			self.0.insert(i, (key, val))
 		}
 	}
-	pub fn remove(&mut self, key: &K) {
+	pub fn remove(&mut self, key: &K) -> Option<(K, V)> {
 		let Some(cs) = self.1.as_mut() else {
-			self.0.retain(|(k,_)| k != key);
-			return;
+			return self.0.binary_search_by(|(k,_)| k.cmp(key)).ok()
+				.map(|i| self.0.remove(i));
 		};
-		if self.0.len() == 1 {
-			Self::merge(&mut self.0, cs, 0);
-			*self = cs.remove(0);
-			return self.remove(key);
-		}
 		let mut i = self.0.binary_search_by(|(k,_)| k.cmp(key))
 			.map(|i| {
 				let mut c = &mut cs[i];
@@ -77,6 +72,10 @@ impl<K: Ord, V> SimpleTree<K, V> {
 		} else {
 			i -= (i > 0 && cs[i-1].0.len() == A) as usize;
 			Self::merge(&mut self.0, cs, i);
+			if self.0.is_empty() {
+				*self = cs.remove(0);
+				return self.remove(key);
+			}
 		}
 		cs[i].remove(key)
 	}

@@ -29,3 +29,22 @@ fn test_remove() {
         tree.remove(&key);
     }
 }
+
+#[test]
+fn test_random() {
+    let mut tree = SimpleTree::default();
+    let mut keys: Vec<i32> = vec![];
+    for _ in 0..10_000 {
+        keys.push(rand::random());
+    }
+    keys.sort();
+    keys.dedup();
+    for &k in &keys {
+        tree.insert(k, ());
+    }
+    eprintln!("{:?}", tree.range(..).collect::<Vec<_>>());
+    for k in &keys {
+        eprintln!("remove {k} from {tree:?}");
+        assert!(tree.remove(k).is_some());
+    }
+}
