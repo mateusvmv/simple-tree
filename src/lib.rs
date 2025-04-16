@@ -80,7 +80,7 @@ impl<K: Ord, V> SimpleTree<K, V> {
 	}
 	pub fn range(&self, range: impl RangeBounds<K>) -> impl Iterator<Item = &(K, V)> {
 		let mut stack = vec![(self, 0, None)];
-		iter::from_coroutine(move || {
+		iter::from_coroutine(#[coroutine] move || {
 			while let Some((t, mut i, aft)) = stack.pop() {
 				while i < t.0.len() && !range.contains(&t.0[i].0) { i += 1 };
 				if let Some(cs) = &t.1 {

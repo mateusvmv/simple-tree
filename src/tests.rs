@@ -53,4 +53,5 @@ fn test_random() {
     for k in &keys {
         assert!(tree.remove(k).is_some());
     }
+    assert!(tree.range(..).next().is_none());
 }
