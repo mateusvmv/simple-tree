@@ -79,15 +79,18 @@ impl<K: Ord, V> SimpleTree<K, V> {
 		cs[i].remove(key)
 	}
 	pub fn range(&self, range: impl RangeBounds<K>) -> impl Iterator<Item = &(K, V)> {
-		let mut stack = vec![(self, 0, None)];
+		let mut stack = [(self, 0, None); 16];
+		let mut len = 1;
 		iter::from_coroutine(#[coroutine] move || {
-			while let Some((t, mut i, aft)) = stack.pop() {
+			while len > 0 {
+				let (t, mut i, aft) = stack[{ len -= 1; len }];
 				while i < t.0.len() && !range.contains(&t.0[i].0) { i += 1 };
 				if let Some(cs) = &t.1 {
 					if i < t.0.len() && range.contains(&t.0[i].0) {
-						stack.extend([(t, i+1, aft), (&cs[i], 0, Some(&t.0[i]))]);
+						stack[len..len+2].copy_from_slice(&[(t, i+1, aft), (&cs[i], 0, Some(&t.0[i]))]);
+						len += 2;
 					} else {
-						stack.push((&cs[i], 0, aft));
+						stack[{ len += 1; len - 1 }] = (&cs[i], 0, aft);
 					}
 				} else {
 					while i < t.0.len() && range.contains(&t.0[i].0) { yield &t.0[i]; i += 1; }
