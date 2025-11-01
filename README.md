@@ -13,10 +13,17 @@ It maintains the following invariants:
 
 These size constraints ensure that the tree remains **perfectly balanced**.
 
-Performance characteristics:
-- Insertions are on par with the Rust standard library, slightly (~1/6th) faster.
-- Removals are around **3× faster** than STL.
-- Range queries are **2× faster** than STL.
+Performance on microbenchmarks (for u32 keys and () values, not generalized):
+- Insertions were on par with the Rust standard library, slightly (~1/6th) faster.
+- Removals were around 3× faster than STL.
+- Range queries were 2× faster than STL.
+
+## TOC
+1. [Implementation](#implementation)
+2. [Building Blocks](#building-blocks)
+3. [Borrowing](#borrowing)
+4. [Insertion and Deletion](#insertion-and-deletion)
+5. [Range Query](#range-query)
 
 ---
 
@@ -40,7 +47,7 @@ Tree(Vec<(Key, Value)>, Option<Vec<Node>>)
 
 ## Building Blocks
 
-The two main operations that mutate the tree are **upgrade** and **downgrade**.  
+The two main operations that mutate the tree are **uplift** and **downlift**.  
 They conceptually move keys *up* or *down* between tree levels, like movements in a 2D plane:
 
 A key moved *up* goes towards the root, and a key moved *down* goes towards the leaves.
@@ -50,6 +57,7 @@ Downgrading a key, on the other hand, merges two nodes in the layer below.
 ---
 
 Consider a B-Tree storing integers from 0–9, with `A = 2` and `B = 5`:
+
 ```rs
 
 // First 5 inserts fit in one node
@@ -73,11 +81,68 @@ Consider a B-Tree storing integers from 0–9, with `A = 2` and `B = 5`:
 
 ```
 
+In fact, these operations also describe a method for fixing arbitrary node operations in batch.
+
+1. Uplift every Bth element in the overfull children, so nodes have up to B keys.
+2. Look for underfull children and perform borrows on them.
+3. Go up and repeat.
+
+The complexity of this will depend on B and on the implementation of uplift and downlift.
+
+If B is too large and calls to these functions are frequent, it might be best to implement the
+tree using another smaller tree for the entries and children, resulting in uplifts and downlifts
+logarithmic on B, rather than linear. Another natural choice would be to use lists, which have
+sequential scan but constant insertion in the middle.
+
+```rs
+
+// Let's say A = 1 and B = A * 2 + 1 = 3
+// Let's create an arbitrary tree with 9, 11, 12, 13, 14 and 15, as follows
+
+  10    12    14
+9    11    13    15
+
+// Then insert the keys 0 to 9 on the left, without regard for invariants
+// And remove 13 in the same manner
+  
+                    10    12 14
+0 1 2 3 4 5 6 7 8 9    11       15
+
+// We uplift every Bth key until the child in question is not full
+      3       7     10    12 14
+0 1 2   4 5 6   8 9    11       15
+
+// We then look for nodes which are underfull and call borrow, in this case 14 gets downlifted
+// Because there is a right child and it has exactly A elements.
+
+      3       7     10    12
+0 1 2   4 5 6   8 9    11    14 15
+
+// Now we must repeat it one layer above
+// Uplift step, every Bth element
+
+                          12
+      3       7     10    
+0 1 2   4 5 6   8 9    11    14 15
+
+// Borrow step
+// In this case, look at 12's right child, there is no right child to it
+// Then we look left, we see that 12's left child has more than A elements
+// Then we uplift 7, to leave that node with A elements, and downlift 12
+
+              7
+      3             10    12
+0 1 2   4 5 6   8 9    11    14 15
+
+// Since the root is now correct, we don't need to repeat
+
+```
+
 ---
 
-### Upgrade Function
+### Uplift Function
 
-`upgrade` promotes one of its keys to the parent as a separator.
+`uplift` promotes one of its keys to the parent as a separator.
 The child is split into two halves: left and right. The left child willl end up
 with all entries before the selected grandchild, and the right half will end up with
 all entries past the selected grandchild. That means `grandchild_index` becomes
@@ -86,7 +151,7 @@ the length of the new left child. The separator and the right child are inserted
 
 ```rs
 
-fn upgrade(entries, children, child_index, grandchild_index) {
+fn uplift(entries, children, child_index, grandchild_index) {
     let left_child = entry in children at child_index
     let promoted_key = extract entry in left_child at grandchild_index
     let right_half = extract entries and children from left_child starting at grandchild_index + 1
@@ -102,16 +167,16 @@ fn upgrade(entries, children, child_index, grandchild_index) {
 
 ---
 
-### Downgrade Function
+### Downlift Function
 
-`downgrade` merges a child with its right sibling.
+`downlift` merges a child with its right sibling.
 It pulls down the separating key from the parent and concatenates both children’s keys and subtrees.
 It takes the separator from index `child_index`, and the right child from index `child_index + 1`, so
 entries past those indices are moved to the left. The left child, at index `child_index`, receives the
 separator and the removed entries from the right child.
 
 ```rs
-fn downgrade(keys, children, child_index) {
+fn downlift(keys, children, child_index) {
     let right_child = remove from children at child_index + 1
     let separator = remove from keys at child_index
 
@@ -133,9 +198,9 @@ If not, we use `borrow` to rebalance — either by:
 2. Merging with a sibling if both are at minimum capacity.
 
 `borrow` prefers merging or borrowing from the **right sibling**, although it makes little difference whether to prefer the
-left or right siblings. When borrowing, it may need to call `upgrade` to split a sibling node so that each child has a valid number of elements,
+left or right siblings. When borrowing, it may need to call `uplift` to split a sibling node so that each child has a valid number of elements,
 and that means the parent node could temporarily have `B+1` elements, if it starts the function with `B` elements.
-Finally, it merges nodes using `downgrade`, which reduces the size of the parent node once again.
+Finally, it merges nodes using `downlift`, which reduces the size of the parent node once again.
 
 ```rs
 
@@ -147,28 +212,28 @@ fn borrow(entries, children, child_index) {
     if has right sibling:
         if right_sibling has |entries| > A:
             let grandchild_index = right_sibling |entries| - A - 1
-            upgrade(entries, children, child_index + 1, grandchild_index)
+            uplift(entries, children, child_index + 1, grandchild_index)
             // right sibling will end up with size |entries| - A - 1
-            // we downgrade and get size A + |right_sibling| + 1 = |entries| > A
-            downgrade(entries, children, child_index)
+            // we downlift and get size A + |right_sibling| + 1 = |entries| > A
+            downlift(entries, children, child_index)
         else:
-            // right_sibling has A entries, so we downgrade and get size 2 * A + 1 = B > A
-            downgrade(entries, children, child_index)
+            // right_sibling has A entries, so we downlift and get size 2 * A + 1 = B > A
+            downlift(entries, children, child_index)
 
     // Else, try left sibling
     else if left_sibling has |entries| <= A:
-        // left_sibling has size A, so we downgrade its key to merge with the next sibling
+        // left_sibling has size A, so we downlift its key to merge with the next sibling
         // it can't have |entries| < A due to our invariants
         decrement child_index
         // we get size 2 * A + 1 = B
-        downgrade(entries, children, child_index)
+        downlift(entries, children, child_index)
     else:
         // left sibling has more than A entries, we split the extra
-        upgrade(entries, children, child_index - 1, A)
+        uplift(entries, children, child_index - 1, A)
         // entry at child_index will have |entries| - A elements
         // we know that entry at child_index + 1 has A elements, it's our previous child
         // we downgrande and get size A + |entries| - A + 1 = |entries| + 1 > A
-        downgrade(entries, children, child_index)
+        downlift(entries, children, child_index)
 
     return updated child_index
 }
@@ -183,7 +248,7 @@ fn borrow(entries, children, child_index) {
 Our implementation of `insert` is **preemptive** — it will attempt to split full nodes *before* descending.
 Whenever we descend, we'll find the correct child with a lower bound on the keys. That is, we find the first key greater than or equal to the desired key, and its index will also give us the index of the child node to descend into. If the key is ever equal, we stop descent on inserts and update the value.
 
-For the inserts, on a node with `B` elements, it will call upgrade with `gc = A`, and that makes two nodes of A elements and one separator, totaling `2 * A + 1 = B`. Since upgrade will create a new separator at `ci`, we might need to move `ci` up by `1`.
+For the inserts, on a node with `B` elements, it will call uplift with `gc = A`, and that makes two nodes of A elements and one separator, totaling `2 * A + 1 = B`. Since uplift will create a new separator at `ci`, we might need to move `ci` up by `1`.
 
 ```rs
 
@@ -200,7 +265,7 @@ fn insert(node, key, value) {
     
     // Preemptive split
     if |entries| of node.children at index > B:
-        upgrade(node.entries, node.children, index, A)
+        uplift(node.entries, node.children, index, A)
         if key > node.entries[index].key:
             index += 1
 

@@ -14,14 +14,14 @@ impl<K, V> Default for SimpleTree<K, V> {
 	}
 }
 impl<K: Ord, V> SimpleTree<K, V> {
-	fn upgrade(ks: &mut Vec<(K, V)>, cs: &mut Vec<Self>, ci: usize, gc: usize) {
+	fn uplift(ks: &mut Vec<(K, V)>, cs: &mut Vec<Self>, ci: usize, gc: usize) {
 		let l = SimpleTree(
 			cs[ci].0.drain(gc+1..).collect(),
 			cs[ci].1.as_mut().map(|v| v.drain(gc+1..).collect()));
 		cs.insert(ci + 1, l);
 		ks.insert(ci, cs[ci].0.remove(gc));
 	}
-	fn downgrade(ks: &mut Vec<(K, V)>, cs: &mut Vec<Self>, ci: usize) {
+	fn downlift(ks: &mut Vec<(K, V)>, cs: &mut Vec<Self>, ci: usize) {
 		let r = cs.remove(ci + 1);
 		cs[ci].0.push(ks.remove(ci));
 		cs[ci].0.extend(r.0);
@@ -31,7 +31,7 @@ impl<K: Ord, V> SimpleTree<K, V> {
 	pub fn insert(&mut self, key: K, val: V) {
 		if self.0.len() == B {
 			let c = mem::take(self);
-			Self::upgrade(&mut self.0, self.1.insert(vec![c]), 0, A);
+			Self::uplift(&mut self.0, self.1.insert(vec![c]), 0, A);
 		}
 		let mut i = self.0.partition_point(|(k, _)| k < &key);
 		if let Some(e) = self.0.get_mut(i) && e.0 == key {
@@ -40,7 +40,7 @@ impl<K: Ord, V> SimpleTree<K, V> {
 		}
 		if let Some(c) = &mut self.1 {
 			if c[i].0.len() == B {
-				Self::upgrade(&mut self.0, c, i, A);
+				Self::uplift(&mut self.0, c, i, A);
 				if self.0[i].0 < key { i += 1 };
 			}
 			c[i].insert(key, val)
@@ -52,14 +52,14 @@ impl<K: Ord, V> SimpleTree<K, V> {
 		if cs[*ci].0.len() > A { return };
 		if let Some(c) = cs.get(*ci + 1) {
 			if c.0.len() > A {
-				Self::upgrade(ks, cs, *ci + 1, c.0.len() - A - 1);
+				Self::uplift(ks, cs, *ci + 1, c.0.len() - A - 1);
 			}
 		} else if cs[*ci-1].0.len() <= A {
 			*ci -= 1;
 		} else {
-			Self::upgrade(ks, cs, *ci - 1, A);
+			Self::uplift(ks, cs, *ci - 1, A);
 		}
-		Self::downgrade(ks, cs, *ci);
+		Self::downlift(ks, cs, *ci);
 	}
 	pub fn remove(&mut self, key: &K) -> Option<(K, V)> {
 		let Some(cs) = self.1.as_mut() else {
